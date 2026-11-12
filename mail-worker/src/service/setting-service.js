@@ -195,7 +195,7 @@ const settingService = {
 		const token = await userContext.getToken(c);
 
 		return {
-			register: settingRow.register,
+			register: String(c.env.public_registration) === 'false' ? 1 : settingRow.register,
 			title: settingRow.title,
 			manyEmail: settingRow.manyEmail,
 			addEmail: settingRow.addEmail,

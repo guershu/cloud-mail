@@ -24,6 +24,10 @@ const loginService = {
 
 	async register(c, params, oauth = false) {
 
+		if (String(c.env.public_registration) === 'false') {
+			throw new BizError(t('regDisabled'));
+		}
+
 		const { email, password, token, code } = params;
 
 		let { regKey, register, registerVerify, regVerifyCount, minEmailPrefix, emailPrefixFilter } = await settingService.query(c)
