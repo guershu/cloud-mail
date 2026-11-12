@@ -30,8 +30,8 @@ onUnmounted(()=>{clearInterval(timer);generation++;password.value='';});
 <template>
 <section class="workspace">
  <header><div><small>MAIL WORKSPACE</small><h1>账户管理</h1><p>创建一个邮箱，在这里等待它的下一封来信。</p></div><el-tag type="success">每 10 秒自动检查来信</el-tag></header>
- <div class="create"><el-input v-model="prefix" placeholder="留空自动生成姓名，例如 lin.chen" aria-label="邮箱前缀"/><el-select v-model="domain" aria-label="邮箱域名"><el-option v-for="d in domains" :key="d" :value="d" :label="'@'+d"/></el-select><el-button type="primary" :loading="busy" :disabled="!domain" @click="create">＋ 快速创建</el-button></div>
- <p class="hint">默认使用常见名字与姓氏组合，重名时添加简短数字。密码自动生成并加密保存。</p>
+ <div class="create"><el-input v-model="prefix" placeholder="留空生成姓名＋数字，例如 jasonwang27" aria-label="邮箱前缀"/><el-select v-model="domain" aria-label="邮箱域名"><el-option v-for="d in domains" :key="d" :value="d" :label="'@'+d"/></el-select><el-button type="primary" :loading="busy" :disabled="!domain" @click="create">＋ 快速创建</el-button></div>
+ <p class="hint">默认使用常见英文名＋姓氏拼写＋简短数字，仅含英文字母和数字。密码自动生成并加密保存。</p>
  <el-alert v-if="error" :title="error" type="error" :closable="false"/>
  <div class="panels">
   <aside><div class="filters"><el-input v-model="query" placeholder="搜索邮箱或备注" clearable aria-label="搜索账户"/><el-select v-model="filter" aria-label="账户状态"><el-option label="全部使用中" value="active"/><el-option label="临时" value="temporary"/><el-option label="已保存" value="saved"/><el-option label="回收站" value="deleted"/></el-select></div>

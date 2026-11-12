@@ -16,28 +16,28 @@ function setup(){
 }
 test('create, encrypted password, account isolation, recycle and restore',async()=>{
  const {db,routes,c}=setup();await routes.middleware(c,async()=>{});
- c.req.json=async()=>({prefix:'lin.chen'});await routes['post/managed/create'](c);
- const stored=db.prepare('SELECT * FROM managed_account').get();assert.equal(stored.email,'lin.chen@example.com');assert.ok(!stored.secret.includes('Aa9!'));
+ c.req.json=async()=>({prefix:'linchen'});await routes['post/managed/create'](c);
+ const stored=db.prepare('SELECT * FROM managed_account').get();assert.equal(stored.email,'linchen@example.com');assert.ok(!stored.secret.includes('Aa9!'));
  c.req.query=k=>({email:stored.email,id:'2'}[k]);const password=(await routes['get/managed/password'](c)).data.password;assert.ok(password.length>=24);
  assert.equal(db.prepare('SELECT password FROM user').get().password,'hash:'+password);
  db.exec(`INSERT INTO account VALUES(2,'other@example.com','other',2,0); INSERT INTO email VALUES(1,1,'mine','from','n','today',0,'',0,0,'body',''); INSERT INTO email VALUES(2,2,'private','from','n','today',0,'',0,0,'secret','')`);
  assert.equal((await routes['get/managed/messages'](c)).data.length,1);await assert.rejects(()=>routes['get/managed/message'](c));
  c.req.json=async()=>({state:'deleted'});await routes['put/managed/state'](c);assert.equal(db.prepare('SELECT is_del FROM user').get().is_del,1);
  c.req.json=async()=>({state:'saved',note:'test'});await routes['put/managed/state'](c);assert.equal(db.prepare('SELECT is_del FROM user').get().is_del,0);
- c.req.json=async()=>({prefix:'lin.chen'});await assert.rejects(()=>routes['post/managed/create'](c));assert.equal(db.prepare('SELECT count(*) AS n FROM user').get().n,1);
+ c.req.json=async()=>({prefix:'linchen'});await assert.rejects(()=>routes['post/managed/create'](c));assert.equal(db.prepare('SELECT count(*) AS n FROM user').get().n,1);
  c.get=()=>({email:'other@example.com'});await assert.rejects(()=>routes.middleware(c,async()=>{}));
 });
 test('JSON-string domain config yields complete addresses and rejects characters/substrings',async()=>{
  const {db,routes,c}=setup();c.env.domain='["canglin.asia"]';await routes.middleware(c,async()=>{});
  assert.equal(JSON.stringify((await routes['get/managed/config'](c)).data.domains),'["canglin.asia"]');
- for(const domain of ['[','canglin','asia','other.asia','',null]){c.req.json=async()=>({prefix:'yu.li',domain});await assert.rejects(()=>routes['post/managed/create'](c));}
- c.req.json=async()=>({prefix:'yu.li'});await routes['post/managed/create'](c);assert.equal(db.prepare('SELECT email FROM user').get().email,'yu.li@canglin.asia');
+ for(const domain of ['[','canglin','asia','other.asia','',null]){c.req.json=async()=>({prefix:'yuli',domain});await assert.rejects(()=>routes['post/managed/create'](c));}
+ c.req.json=async()=>({prefix:'yuli'});await routes['post/managed/create'](c);assert.equal(db.prepare('SELECT email FROM user').get().email,'yuli@canglin.asia');
  for(const config of ['[', '"canglin.asia"', '[]','["["]']){c.env.domain=config;assert.throws(()=>routes['get/managed/config'](c));}
 });
 test('repair preserves password, identity, notes and messages',async()=>{
  const {db,routes,c}=setup();await routes.middleware(c,async()=>{});
- c.req.json=async()=>({prefix:'yu.li'});await routes['post/managed/create'](c);
- c.req.query=()=> 'yu.li@example.com';const password=(await routes['get/managed/password'](c)).data.password;
+ c.req.json=async()=>({prefix:'yuli'});await routes['post/managed/create'](c);
+ c.req.query=()=> 'yuli@example.com';const password=(await routes['get/managed/password'](c)).data.password;
  const bytes=new TextEncoder(),iv=crypto.getRandomValues(new Uint8Array(12));
  const key=await crypto.subtle.importKey('raw',await crypto.subtle.digest('SHA-256',bytes.encode(c.env.ACCOUNT_VAULT_KEY)),'AES-GCM',false,['encrypt']);
  const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:bytes.encode('yu.li@[')},key,bytes.encode(password));
@@ -46,8 +46,16 @@ test('repair preserves password, identity, notes and messages',async()=>{
  db.exec("UPDATE user SET email='yu.li@['; UPDATE account SET email='yu.li@['; INSERT INTO email VALUES(1,1,'mine','from','n','today',0,'',0,0,'body','')");
  c.env.domain='["canglin.asia"]';c.req.query=()=> 'yu.li@[';c.req.json=async()=>({domain:'canglin.asia'});
  await routes['post/managed/repair'](c);
- c.req.query=()=> 'yu.li@canglin.asia';assert.equal((await routes['get/managed/password'](c)).data.password,password);
+ c.req.query=()=> 'yuli@canglin.asia';assert.equal((await routes['get/managed/password'](c)).data.password,password);
  assert.equal(db.prepare('SELECT note FROM managed_account').get().note,'keep');assert.equal(db.prepare('SELECT user_id FROM user').get().user_id,1);
  assert.equal((await routes['get/managed/messages'](c)).data.length,1);
  await assert.rejects(()=>routes['post/managed/repair'](c));
+});
+
+test('generated addresses use natural names plus digits; punctuation is rejected',async()=>{
+ const {db,routes,c}=setup();await routes.middleware(c,async()=>{});
+ for(const prefix of ['alex.wang','alex!wang','alex_wang','alex-wang','alex wang']){c.req.json=async()=>({prefix});await assert.rejects(()=>routes['post/managed/create'](c));}
+ c.req.json=async()=>({});
+ for(let i=0;i<15;i++){const row=(await routes['post/managed/create'](c)).data;assert.match(row.email,/^[a-z]+[0-9]{2,3}@example\.com$/);}
+ assert.equal(db.prepare('SELECT count(*) AS n FROM user').get().n,15);
 });

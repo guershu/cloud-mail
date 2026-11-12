@@ -43,7 +43,7 @@ function selectedDomain(c, input) {
  if(typeof domain!=='string'||!allowed.includes(domain)) throw new BizError('请选择完整且有效的邮箱域名');
  return domain;
 }
-const first=['lin','wei','ming','yan','chen','yu','hao','ning','jason','alex','emma','lucas','olivia','ethan','sophia','leo'];
+const first=['jason','alex','emma','lucas','olivia','ethan','sophia','leo','daniel','sarah','kevin','alice','eric','chloe','ryan','lily','henry','grace','david','nina'];
 const last=['chen','wang','li','zhang','liu','zhou','wu','xu','sun','lin','zhao','huang'];
 const pick=a=>a[crypto.getRandomValues(new Uint32Array(1))[0]%a.length];
 app.get('/managed/config',c=>c.json(result.ok({domains:domains(c)})));
@@ -52,12 +52,12 @@ app.post('/managed/create',async c=>{
  const body=await c.req.json();
  const domain=selectedDomain(c,body.domain);
  let prefix=(body.prefix||'').trim().toLowerCase();
- if(prefix && !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(prefix)) throw new BizError('前缀请使用字母、数字及分隔符');
+ if(prefix && !/^[a-z][a-z0-9]*$/.test(prefix)) throw new BizError('前缀仅支持英文字母和数字，且以字母开头');
  if(prefix.length>40) throw new BizError('前缀最多40个字符');
  if(!prefix) {
-  const base=pick(first)+'.'+pick(last);
+  const base=pick(first)+pick(last);
   for(let i=0;i<30;i++) {
-   prefix=base+(i?String(10+crypto.getRandomValues(new Uint32Array(1))[0]%990):'');
+   prefix=base+String(i ? 100+crypto.getRandomValues(new Uint32Array(1))[0]%900 : 10+crypto.getRandomValues(new Uint32Array(1))[0]%90);
    if(!await c.env.db.prepare('SELECT 1 FROM account WHERE email = ? COLLATE NOCASE').bind(prefix+'@'+domain).first()) break;
   }
  }
@@ -120,7 +120,9 @@ app.post('/managed/repair',async c=>{
  const [prefix,oldDomain,...extra]=row.email.split('@');
  if(extra.length||!prefix||validDomain(oldDomain||'')) throw new BizError('该账户无需修复');
  const body=await c.req.json();
- const email=prefix+'@'+selectedDomain(c,body.domain);
+ const repairedPrefix=prefix.toLowerCase().replace(/[^a-z0-9]/g,'');
+ if(!/^[a-z][a-z0-9]{0,39}$/.test(repairedPrefix)) throw new BizError('原账户前缀无法修复');
+ const email=repairedPrefix+'@'+selectedDomain(c,body.domain);
  if(await c.env.db.prepare('SELECT 1 FROM account WHERE email=? COLLATE NOCASE').bind(email).first() || await c.env.db.prepare('SELECT 1 FROM user WHERE email=? COLLATE NOCASE').bind(email).first()) throw new BizError('正确地址已存在，请保留原账户并使用其他前缀');
  const user=await c.env.db.prepare('SELECT user_id FROM user WHERE email=? COLLATE NOCASE').bind(row.email).first();
  if(!user) throw new BizError('原账户不存在');
