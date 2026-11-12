@@ -4,6 +4,16 @@ import {ElMessage,ElMessageBox} from 'element-plus';
 import DOMPurify from 'dompurify';
 import http from '@/axios';
 const accounts=ref([]),selected=ref(null),messages=ref([]),mail=ref(null),query=ref(''),filter=ref('active'),busy=ref(false),loading=ref(false),error=ref(''),prefix=ref(''),domain=ref(''),domains=ref([]),note=ref(''),password=ref('');
+const compose=ref(false),sending=ref(false),sender=ref(''),draft=ref({to:'',subject:'',text:''}),sendError=ref('');
+function write(){sender.value=selected.value.email;draft.value={to:'',subject:'',text:''};sendError.value='';compose.value=true;}
+async function sendMessage(){
+ if(sending.value)return;
+ if(!draft.value.to.trim()||!draft.value.subject.trim()||!draft.value.text.trim()){sendError.value='请填写收件人、主题和正文';return;}
+ sending.value=true;sendError.value='';
+ try{await http.post('/managed/send',{...draft.value},{params:{email:sender.value},noMsg:true,timeout:60000});ElMessage.success('邮件已提交发送');compose.value=false;draft.value={to:'',subject:'',text:''};}
+ catch(e){sendError.value=e.message||'发送失败，请稍后重试';}
+ finally{sending.value=false;}
+}
 let generation=0,timer,checking=false;
 const filtered=computed(()=>accounts.value.filter(a=>(filter.value==='active'?a.state!=='deleted':a.state===filter.value)&&(a.email+' '+a.note).toLowerCase().includes(query.value.toLowerCase())));
 const html=computed(()=>'<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; img-src data:; base-uri \'none\'; form-action \'none\'"><style>body{font:15px/1.7 sans-serif;overflow-wrap:anywhere;padding:16px}img{max-width:100%}</style>'+DOMPurify.sanitize(mail.value?.content||'',{FORBID_TAGS:['form','iframe','object','embed'],FORBID_ATTR:['srcset']}));
@@ -39,11 +49,21 @@ onUnmounted(()=>{clearInterval(timer);generation++;password.value='';});
    <button v-for="a in filtered" :key="a.email" class="account" :class="{chosen:selected?.email===a.email}" @click="choose(a)"><strong>{{a.email}}</strong><span>{{a.note||'暂无备注'}}</span><small>{{{temporary:'临时',saved:'已保存',deleted:'回收站'}[a.state]}} · {{a.created_at}}</small></button>
    <el-empty v-if="!filtered.length" description="没有符合条件的账户" :image-size="70"/>
   </aside>
-  <main v-if="selected"><div class="identity"><el-alert v-if="selected.email.endsWith('@[') || !selected.email.split('@')[1]?.includes('.')" type="error" :closable="false"><template #title>此地址不完整，请先修复 <el-button :loading="busy" :disabled="!domain" @click="repair">修复为 @{{domain}}</el-button></template></el-alert><h2>{{selected.email}}</h2><div class="actions"><el-button @click="copy(selected.email)">复制邮箱</el-button><el-button @click="password?password='':reveal()">{{password?'隐藏密码':'查看密码'}}</el-button><el-button v-if="selected.state!=='deleted'" type="danger" plain @click="update('deleted')">删除</el-button><el-button v-else @click="update('temporary')">恢复账户</el-button></div><div v-if="password" class="password"><code>{{password}}</code><el-button text @click="copy(password)">复制密码</el-button></div><div class="notes"><el-input v-model="note" maxlength="500" placeholder="网站、用途或备注" aria-label="账户备注"/><el-button :disabled="selected.state==='deleted'" @click="update('saved')">保存账户</el-button></div></div>
+  <main v-if="selected"><div class="identity"><el-alert v-if="selected.email.endsWith('@[') || !selected.email.split('@')[1]?.includes('.')" type="error" :closable="false"><template #title>此地址不完整，请先修复 <el-button :loading="busy" :disabled="!domain" @click="repair">修复为 @{{domain}}</el-button></template></el-alert><h2>{{selected.email}}</h2><div class="actions"><el-button type="primary" :disabled="selected.state==='deleted' || !domains.includes(selected.email.split('@')[1])" @click="write">写邮件</el-button><el-button @click="copy(selected.email)">复制邮箱</el-button><el-button @click="password?password='':reveal()">{{password?'隐藏密码':'查看密码'}}</el-button><el-button v-if="selected.state!=='deleted'" type="danger" plain @click="update('deleted')">删除</el-button><el-button v-else @click="update('temporary')">恢复账户</el-button></div><div v-if="password" class="password"><code>{{password}}</code><el-button text @click="copy(password)">复制密码</el-button></div><div class="notes"><el-input v-model="note" maxlength="500" placeholder="网站、用途或备注" aria-label="账户备注"/><el-button :disabled="selected.state==='deleted'" @click="update('saved')">保存账户</el-button></div></div>
    <div class="inbox-title"><h3>邮件预览</h3><el-button :loading="loading" @click="refreshMail">刷新</el-button></div>
    <div class="mail-grid"><div class="message-list"><button v-for="m in messages" :key="m.email_id" class="message" :class="{chosen:mail?.email_id===m.email_id}" @click="open(m)"><strong>{{m.unread===0?'● ':''}}{{m.subject||'（无主题）'}}</strong><span>{{m.name||m.send_email}}</span><small>{{m.create_time}}</small></button><el-empty v-if="!messages.length&&!loading" description="暂无邮件，发送一封测试邮件试试" :image-size="60"/><el-button v-if="messages.length>=50" text @click="older">加载更早邮件</el-button></div><article v-if="mail"><h3>{{mail.subject}}</h3><p>{{mail.send_email}} · {{mail.create_time}}</p><el-button v-if="mail.code" @click="copy(mail.code)">复制验证码 {{mail.code}}</el-button><iframe v-if="mail.content" title="邮件正文" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" :srcdoc="html"/><pre v-else>{{mail.text}}</pre></article><div v-else class="placeholder">选择一封邮件查看正文</div></div>
   </main><div v-else class="placeholder">创建或选择账户，即可查看对应邮件</div>
  </div>
+<el-dialog v-model="compose" title="发送邮件" width="min(620px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!sending" :show-close="!sending">
+ <el-form label-position="top" @submit.prevent="sendMessage">
+  <el-form-item label="发件人"><el-input :model-value="sender" readonly/></el-form-item>
+  <el-form-item label="收件人"><el-input v-model="draft.to" placeholder="name@example.com" :disabled="sending"/></el-form-item>
+  <el-form-item label="主题"><el-input v-model="draft.subject" maxlength="200" :disabled="sending"/></el-form-item>
+  <el-form-item label="正文"><el-input v-model="draft.text" type="textarea" :rows="9" maxlength="100000" :disabled="sending"/></el-form-item>
+  <el-alert v-if="sendError" :title="sendError" type="error" :closable="false"/>
+ </el-form>
+ <template #footer><el-button :disabled="sending" @click="compose=false">取消</el-button><el-button type="primary" :loading="sending" @click="sendMessage">发送邮件</el-button></template>
+</el-dialog>
 </section>
 </template>
 <style scoped>

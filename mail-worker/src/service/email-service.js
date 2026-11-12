@@ -332,7 +332,7 @@ const emailService = {
 	},
 
 	// 发送入口：公共校验、参数准备、渠道选择和结果汇总。
-	async send(c, params, userId) {
+	async send(c, params, userId, { managedByAdmin = false } = {}) {
 		let {
 			accountId, //发送账号id
 			name, //发件人名字
@@ -356,6 +356,8 @@ const emailService = {
 
 		const userRow = await userService.selectById(c, userId);
 		const roleRow = await roleService.selectById(c, userRow.type);
+		// Only the authenticated administrator may send on behalf of a managed user.
+		const adminSender = c.env.admin === userRow.email || (managedByAdmin && c.get('user')?.email === c.env.admin);
 
 		//判断接收方是不是全部为站内邮箱
 		const allInternal = receiveEmail.every(email => {
@@ -363,7 +365,7 @@ const emailService = {
 			return domainList.includes(domain);
 		});
 
-		if (c.env.admin !== userRow.email) {
+		if (!adminSender) {
 
 			//发件被禁用
 			if (roleRow.sendType === 'ban') {
@@ -378,7 +380,7 @@ const emailService = {
 		}
 
 		//如果不是管理员，权限设置了发送次数
-		if (c.env.admin !== userRow.email && roleRow.sendCount) {
+		if (!adminSender && roleRow.sendCount) {
 
 			if (userRow.sendCount >= roleRow.sendCount) {
 				if (roleRow.sendType === 'day') throw new BizError(t('daySendLimit'), 403);
@@ -402,7 +404,7 @@ const emailService = {
 			throw new BizError(t('sendEmailNotCurUser'));
 		}
 
-		if (c.env.admin !== userRow.email) {
+		if (!adminSender) {
 			//用户没有这个域名的使用权限
 			if(!roleService.hasAvailDomainPerm(roleRow.availDomain, accountRow.email)) {
 				throw new BizError(t('noDomainPermSend'),403)

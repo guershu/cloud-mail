@@ -4,6 +4,8 @@ import BizError from '../error/biz-error';
 import cryptoUtils from '../utils/crypto-utils';
 import roleService from '../service/role-service';
 import KvConst from '../const/kv-const';
+import emailService from '../service/email-service';
+import verifyUtils from '../utils/verify-utils';
 
 const enc = new TextEncoder();
 const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
@@ -134,4 +136,22 @@ app.post('/managed/repair',async c=>{
  ]);
  await c.env.kv.delete(KvConst.AUTH_INFO+user.user_id);
  return c.json(result.ok({email}));
+});
+
+app.post('/managed/send',async c=>{
+ const row=await managed(c);
+ if(row.state==='deleted') throw new BizError('请先恢复账户再发送邮件');
+ if(!verifyUtils.isEmail(row.email)) throw new BizError('请先修复邮箱地址');
+ const sender=await c.env.db.prepare(`SELECT a.account_id,a.user_id FROM account a JOIN user u ON u.user_id=a.user_id WHERE a.email=? COLLATE NOCASE AND a.is_del=0 AND u.is_del=0 AND u.status=0`).bind(row.email).first();
+ if(!sender) throw new BizError('发件账户不可用');
+ const {to,subject,text}=await c.req.json();
+ if(typeof to!=='string'||!verifyUtils.isEmail(to.trim())) throw new BizError('请输入有效的收件人邮箱');
+ if(typeof subject!=='string'||!subject.trim()||subject.length>200) throw new BizError('请填写主题，最多200个字符');
+ if(typeof text!=='string'||!text.trim()||text.length>100000) throw new BizError('请填写正文，最多100000个字符');
+ const escaped=text.replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+ const sent=await emailService.send(c,{
+  accountId:sender.account_id,receiveEmail:[to.trim()],subject:subject.trim(),text,
+  content:'<div style="white-space:pre-wrap">'+escaped+'</div>',sendType:'send',attachments:[]
+ },sender.user_id,{managedByAdmin:true});
+ return c.json(result.ok(sent));
 });

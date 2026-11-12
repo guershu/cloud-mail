@@ -7,12 +7,13 @@ function setup(){
  const db=new DatabaseSync(':memory:');
  db.exec(`CREATE TABLE user(user_id INTEGER PRIMARY KEY,email TEXT UNIQUE,password TEXT,salt TEXT,type INTEGER,status INTEGER DEFAULT 0,is_del INTEGER DEFAULT 0); CREATE TABLE account(account_id INTEGER PRIMARY KEY,email TEXT UNIQUE,name TEXT,user_id INTEGER,is_del INTEGER DEFAULT 0); CREATE TABLE email(email_id INTEGER PRIMARY KEY,account_id INTEGER,subject TEXT,send_email TEXT,name TEXT,create_time TEXT,unread INTEGER,code TEXT,type INTEGER,is_del INTEGER,text TEXT,content TEXT);`);
  const prepare=sql=>{let args=[];return {bind(...a){args=a;return this},async run(){return db.prepare(sql).run(...args)},async first(){return db.prepare(sql).get(...args)},async all(){return {results:db.prepare(sql).all(...args)}}}};
+ const sent=[];
  const routes={},app={use(p,f){routes.middleware=f}};
  for(const method of ['get','post','put'])app[method]=(p,f)=>routes[method+p]=f;
  let source=readFileSync(new URL('../mail-worker/src/api/managed-api.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
- vm.runInNewContext(source,{app,result:{ok:data=>({data})},BizError:Error,cryptoUtils:{hashPassword:async password=>({salt:'salt',hash:'hash:'+password})},roleService:{selectDefaultRole:async()=>({roleId:1})},KvConst:{AUTH_INFO:'auth:'},crypto,TextEncoder,TextDecoder,Uint8Array,Uint32Array,btoa,atob});
+ vm.runInNewContext(source,{app,emailService:{send:async(c,params,userId,options)=>{sent.push({params,userId,options});return []}},verifyUtils:{isEmail:s=>/^[a-z0-9.]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s)},result:{ok:data=>({data})},BizError:Error,cryptoUtils:{hashPassword:async password=>({salt:'salt',hash:'hash:'+password})},roleService:{selectDefaultRole:async()=>({roleId:1})},KvConst:{AUTH_INFO:'auth:'},crypto,TextEncoder,TextDecoder,Uint8Array,Uint32Array,btoa,atob});
  const c={env:{admin:'admin@example.com',domain:['example.com'],ACCOUNT_VAULT_KEY:'test-fixture-key-not-for-production',db:{prepare,async batch(items){db.exec('BEGIN');try{for(const item of items)await item.run();db.exec('COMMIT')}catch(e){db.exec('ROLLBACK');throw e}}},kv:{delete:async()=>{}}},get:()=>({email:'admin@example.com'}),header(){},json:x=>x,req:{query:()=>undefined,json:async()=>({})}};
- return {db,routes,c};
+ return {db,routes,c,sent};
 }
 test('create, encrypted password, account isolation, recycle and restore',async()=>{
  const {db,routes,c}=setup();await routes.middleware(c,async()=>{});
@@ -58,4 +59,19 @@ test('generated addresses use natural names plus digits; punctuation is rejected
  c.req.json=async()=>({});
  for(let i=0;i<15;i++){const row=(await routes['post/managed/create'](c)).data;assert.match(row.email,/^[a-z]+[0-9]{2,3}@example\.com$/);}
  assert.equal(db.prepare('SELECT count(*) AS n FROM user').get().n,15);
+});
+
+test('managed send binds the sender, escapes text and rejects disabled/deleted accounts',async()=>{
+ const {db,routes,c,sent}=setup();await routes.middleware(c,async()=>{});
+ c.req.json=async()=>({prefix:'alexwang27'});await routes['post/managed/create'](c);
+ c.req.query=()=> 'alexwang27@example.com';
+ c.req.json=async()=>({to:' recipient@example.net ',subject:' Hi ',text:'<img src=x> & hello',accountId:999,userId:999});
+ await routes['post/managed/send'](c);
+ assert.equal(sent.length,1);assert.equal(sent[0].params.accountId,1);assert.equal(sent[0].userId,1);assert.equal(sent[0].options.managedByAdmin,true);
+ assert.equal(sent[0].params.receiveEmail[0],'recipient@example.net');assert.ok(sent[0].params.content.includes('&lt;img src=x&gt; &amp; hello'));
+ for(const body of [{to:'invalid',subject:'hi',text:'body'},{to:'r@example.net',subject:'',text:'body'},{to:'r@example.net',subject:'hi',text:''}]){c.req.json=async()=>body;await assert.rejects(()=>routes['post/managed/send'](c));}
+ c.req.json=async()=>({to:'r@example.net',subject:'hi',text:'body'});
+ db.exec('UPDATE user SET status=1');await assert.rejects(()=>routes['post/managed/send'](c));
+ db.exec("UPDATE user SET status=0; UPDATE managed_account SET state='deleted'");await assert.rejects(()=>routes['post/managed/send'](c));
+ assert.equal(sent.length,1);
 });
