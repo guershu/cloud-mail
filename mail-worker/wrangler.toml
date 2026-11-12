@@ -6,14 +6,15 @@ keep_vars = true
 [observability]
 enabled = true
 
-#[[d1_databases]]
-#binding = "db"			#d1数据库绑定名默认不可修改
-#database_name = ""		#d1数据库名字
-#database_id = ""		#d1数据库id
+# Persist production bindings across Git-based deployments.
+[[d1_databases]]
+binding = "db"
+database_name = "cloud-mail-db"
+database_id = "cd093a91-22f3-47fe-98c4-c2ac1eed4fe4"
 
-#[[kv_namespaces]]
-#binding = "kv"			#kv绑定名默认不可修改
-#id = ""					#kv数据库id
+[[kv_namespaces]]
+binding = "kv"
+id = "3679dc86e7974c4fb58197274d24a0fb"
 
 #[[r2_buckets]]
 #binding = "r2"			#r2对象存储绑定名默认不可修改
