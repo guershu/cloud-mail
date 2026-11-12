@@ -82,6 +82,11 @@ export async function email(message, env, ctx) {
 			 userRow = await userService.selectByIdIncludeDel({ env: env }, account.userId);
 		}
 
+		if (account && (account.isDel === isDel.DELETE || userRow.isDel === isDel.DELETE || userRow.status === 1)) {
+			message.setReject('Recipient disabled');
+			return;
+		}
+
 		if (account && userRow.email !== env.admin) {
 
 			let { banEmail, availDomain } = await roleService.selectByUserId({ env: env }, account.userId);

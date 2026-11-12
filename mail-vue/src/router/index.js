@@ -11,6 +11,7 @@ const routes = [
         redirect: '/inbox',
         component: () => import('@/layout/index.vue'),
         children: [
+            { path: "/accounts", name: "managed", component: () => import("@/views/managed/index.vue"), meta: { title: "账户管理", name: "managed", menu: true } },
             {
                 path: '/inbox',
                 name: 'email',
