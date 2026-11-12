@@ -26,15 +26,31 @@ app.use('/managed/*', async(c,next)=>{
  await c.env.db.prepare(`CREATE TABLE IF NOT EXISTS managed_account (email TEXT PRIMARY KEY COLLATE NOCASE, secret TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', state TEXT NOT NULL DEFAULT 'temporary', created_at TEXT DEFAULT CURRENT_TIMESTAMP)`).run();
  await next();
 });
+// Dashboard text variables arrive as JSON strings; wrangler arrays arrive as arrays.
+function domains(c) {
+ let value=c.env.domain;
+ try { if(typeof value==='string') value=JSON.parse(value); }
+ catch { throw new BizError('邮箱域名配置必须是 JSON 数组'); }
+ if(!Array.isArray(value)||!value.length||value.some(d=>typeof d!=='string'||!validDomain(d.trim().toLowerCase()))) throw new BizError('邮箱域名配置无效');
+ return [...new Set(value.map(d=>d.trim().toLowerCase()))];
+}
+function validDomain(d) {
+ return d.length<=253 && d.includes('.') && d.split('.').every(label=>/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+function selectedDomain(c, input) {
+ const allowed=domains(c);
+ const domain=input===undefined?allowed[0]:input;
+ if(typeof domain!=='string'||!allowed.includes(domain)) throw new BizError('请选择完整且有效的邮箱域名');
+ return domain;
+}
 const first=['lin','wei','ming','yan','chen','yu','hao','ning','jason','alex','emma','lucas','olivia','ethan','sophia','leo'];
 const last=['chen','wang','li','zhang','liu','zhou','wu','xu','sun','lin','zhao','huang'];
 const pick=a=>a[crypto.getRandomValues(new Uint32Array(1))[0]%a.length];
-app.get('/managed/config',c=>c.json(result.ok({domains:c.env.domain})));
+app.get('/managed/config',c=>c.json(result.ok({domains:domains(c)})));
 app.get('/managed/list',async c=>c.json(result.ok((await c.env.db.prepare('SELECT email,note,state,created_at FROM managed_account ORDER BY created_at DESC,email').all()).results)));
 app.post('/managed/create',async c=>{
  const body=await c.req.json();
- const domain=body.domain || c.env.domain[0];
- if(!c.env.domain.includes(domain)) throw new BizError('无效域名');
+ const domain=selectedDomain(c,body.domain);
  let prefix=(body.prefix||'').trim().toLowerCase();
  if(prefix && !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(prefix)) throw new BizError('前缀请使用字母、数字及分隔符');
  if(prefix.length>40) throw new BizError('前缀最多40个字符');
@@ -96,4 +112,24 @@ app.get('/managed/message',async c=>{
  if(!mail) throw new BizError('邮件不存在',404);
  await c.env.db.prepare('UPDATE email SET unread=1 WHERE email_id=?').bind(mail.email_id).run();
  return c.json(result.ok(mail));
+});
+
+// Repair only malformed addresses from the previous domain parsing bug.
+app.post('/managed/repair',async c=>{
+ const row=await managed(c);
+ const [prefix,oldDomain,...extra]=row.email.split('@');
+ if(extra.length||!prefix||validDomain(oldDomain||'')) throw new BizError('该账户无需修复');
+ const body=await c.req.json();
+ const email=prefix+'@'+selectedDomain(c,body.domain);
+ if(await c.env.db.prepare('SELECT 1 FROM account WHERE email=? COLLATE NOCASE').bind(email).first() || await c.env.db.prepare('SELECT 1 FROM user WHERE email=? COLLATE NOCASE').bind(email).first()) throw new BizError('正确地址已存在，请保留原账户并使用其他前缀');
+ const user=await c.env.db.prepare('SELECT user_id FROM user WHERE email=? COLLATE NOCASE').bind(row.email).first();
+ if(!user) throw new BizError('原账户不存在');
+ const secret=await seal(c,await unseal(c,row.secret,row.email),email);
+ await c.env.db.batch([
+  c.env.db.prepare('UPDATE managed_account SET email=?,secret=? WHERE email=?').bind(email,secret,row.email),
+  c.env.db.prepare('UPDATE user SET email=? WHERE user_id=?').bind(email,user.user_id),
+  c.env.db.prepare('UPDATE account SET email=? WHERE email=? COLLATE NOCASE AND user_id=?').bind(email,row.email,user.user_id)
+ ]);
+ await c.env.kv.delete(KvConst.AUTH_INFO+user.user_id);
+ return c.json(result.ok({email}));
 });

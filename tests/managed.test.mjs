@@ -27,3 +27,27 @@ test('create, encrypted password, account isolation, recycle and restore',async(
  c.req.json=async()=>({prefix:'lin.chen'});await assert.rejects(()=>routes['post/managed/create'](c));assert.equal(db.prepare('SELECT count(*) AS n FROM user').get().n,1);
  c.get=()=>({email:'other@example.com'});await assert.rejects(()=>routes.middleware(c,async()=>{}));
 });
+test('JSON-string domain config yields complete addresses and rejects characters/substrings',async()=>{
+ const {db,routes,c}=setup();c.env.domain='["canglin.asia"]';await routes.middleware(c,async()=>{});
+ assert.equal(JSON.stringify((await routes['get/managed/config'](c)).data.domains),'["canglin.asia"]');
+ for(const domain of ['[','canglin','asia','other.asia','',null]){c.req.json=async()=>({prefix:'yu.li',domain});await assert.rejects(()=>routes['post/managed/create'](c));}
+ c.req.json=async()=>({prefix:'yu.li'});await routes['post/managed/create'](c);assert.equal(db.prepare('SELECT email FROM user').get().email,'yu.li@canglin.asia');
+ for(const config of ['[', '"canglin.asia"', '[]','["["]']){c.env.domain=config;assert.throws(()=>routes['get/managed/config'](c));}
+});
+test('repair preserves password, identity, notes and messages',async()=>{
+ const {db,routes,c}=setup();await routes.middleware(c,async()=>{});
+ c.req.json=async()=>({prefix:'yu.li'});await routes['post/managed/create'](c);
+ c.req.query=()=> 'yu.li@example.com';const password=(await routes['get/managed/password'](c)).data.password;
+ const bytes=new TextEncoder(),iv=crypto.getRandomValues(new Uint8Array(12));
+ const key=await crypto.subtle.importKey('raw',await crypto.subtle.digest('SHA-256',bytes.encode(c.env.ACCOUNT_VAULT_KEY)),'AES-GCM',false,['encrypt']);
+ const ciphertext=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:bytes.encode('yu.li@[')},key,bytes.encode(password));
+ const b64=x=>Buffer.from(x).toString('base64');
+ db.prepare("UPDATE managed_account SET email='yu.li@[',secret=?,note='keep'").run(b64(iv)+'.'+b64(ciphertext));
+ db.exec("UPDATE user SET email='yu.li@['; UPDATE account SET email='yu.li@['; INSERT INTO email VALUES(1,1,'mine','from','n','today',0,'',0,0,'body','')");
+ c.env.domain='["canglin.asia"]';c.req.query=()=> 'yu.li@[';c.req.json=async()=>({domain:'canglin.asia'});
+ await routes['post/managed/repair'](c);
+ c.req.query=()=> 'yu.li@canglin.asia';assert.equal((await routes['get/managed/password'](c)).data.password,password);
+ assert.equal(db.prepare('SELECT note FROM managed_account').get().note,'keep');assert.equal(db.prepare('SELECT user_id FROM user').get().user_id,1);
+ assert.equal((await routes['get/managed/messages'](c)).data.length,1);
+ await assert.rejects(()=>routes['post/managed/repair'](c));
+});
